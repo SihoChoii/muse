@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React + TS</title>
+  </head>
+  <body>
+    <div id="global-error-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); color:red; padding:20px; z-index:9999; overflow:auto; white-space:pre-wrap; font-family:monospace;"></div>
+    <script>
+      window.addEventListener('error', function(event) {
+        const overlay = document.getElementById('global-error-overlay');
+        overlay.style.display = 'block';
+        overlay.innerText += 'Global Error: ' + event.message + '\nat ' + event.filename + ':' + event.lineno + '\n\n';
+        console.error('Global Error:', event);
+      });
+      window.addEventListener('unhandledrejection', function(event) {
+        const overlay = document.getElementById('global-error-overlay');
+        overlay.style.display = 'block';
+        overlay.innerText += 'Unhandled Rejection: ' + event.reason + '\n\n';
+        console.error('Unhandled Rejection:', event);
+      });
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
