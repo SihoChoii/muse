@@ -23,8 +23,8 @@ const SceneWrapper = () => {
 const CdSpinnerModule: VisualizerModule = {
     id: 'cd-spinner',
     name: 'CD Spinner',
-    description: 'A 3D CD inspired by Kanye West\'s Yeezus album cover with interactive particles.',
-    thumbnail: '/assets/thumbnails/cd-spinner.jpg',
+    description: 'Spin Spin Spin',
+    thumbnail: '/assets/thumbnails/cd-spinner.mp4',
     component: SceneWrapper,
     controls: Controls,
 };

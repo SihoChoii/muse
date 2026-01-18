@@ -106,3 +106,59 @@
     color: var(--color-foreground);
   }
 }
+
+@layer utilities {
+  .bg-noise {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .bg-noise::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* Subtle noise SVG data URI */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 50;
+    mix-blend-mode: overlay;
+  }
+
+  /* Dithered Glow Effect */
+  /* This creates a colored glow with a grainy texture fade */
+  .glow-dither {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .glow-dither::after {
+    content: "";
+    position: absolute;
+    inset: -40px;
+    /* Glow extends further outside */
+    z-index: -1;
+    background: radial-gradient(circle at center,
+        rgba(255, 255, 255, 0.4) 0%,
+        rgba(255, 255, 255, 0.1) 40%,
+        rgba(255, 255, 255, 0) 70%);
+    /* Apply noise mask for dither look */
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+    -webkit-mask-repeat: repeat;
+    mask-repeat: repeat;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+
+  .glow-dither:hover::after {
+    opacity: 1;
+  }
+
+  /* Constant glow for active state if needed */
+  .glow-dither-active::after {
+    opacity: 1;
+  }
+}
