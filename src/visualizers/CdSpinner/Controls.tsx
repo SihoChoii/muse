@@ -4,6 +4,7 @@ import { useVideoRenderer } from '../../hooks/useVideoRenderer';
 import { FilePicker } from '../../components/shell/FilePicker';
 import { RefreshCcw } from 'lucide-react';
 import { ReactivityPanel } from './ReactivityPanel';
+import { PresetManager } from '../../components/shell/PresetManager';
 
 const SliderRow = ({
     label,
@@ -116,9 +117,74 @@ export function Controls() {
         setRotation(axis, rad);
     };
 
+    // Preset Integration
+    // "Save everything" - capture all state that defines the visualizer's look and behavior
+    const currentConfig = {
+        rotationSpeed,
+        position,
+        scale,
+        coverArt,
+        background,
+        audioReactiveSettings: useCdStore.getState().audioReactiveSettings, // Grab latest
+        exportSettings,
+        camera: useCdStore.getState().camera // Capture current camera state
+    };
+
+    const handlePresetLoad = (config: any) => {
+        if (!config) return;
+
+        // --- Core Transform ---
+        if (config.rotationSpeed) {
+            setRotationSpeed('x', config.rotationSpeed.x);
+            setRotationSpeed('y', config.rotationSpeed.y);
+            setRotationSpeed('z', config.rotationSpeed.z);
+        }
+        if (config.position) {
+            setPosition('x', config.position.x);
+            setPosition('y', config.position.y);
+        }
+        if (config.scale !== undefined) setScale(config.scale);
+
+        // --- Visuals ---
+        // Cover Art: Handle null explicitly (if preset cleared it)
+        if (config.coverArt !== undefined) setCoverArt(config.coverArt);
+
+        if (config.background) {
+            if (typeof config.background === 'object' && config.background.type) {
+                setBackground(config.background.type, config.background.value);
+            }
+        }
+
+        // --- Reactivity ---
+        if (config.audioReactiveSettings) {
+            // We use a specific setter for reactivity to merge or overwrite
+            // The store has setAudioReactiveSettings which does a partial merge.
+            // For a preset load, we probably want to overwrite significant parts or all of it.
+            // Let's pass the whole object.
+            useCdStore.getState().setAudioReactiveSettings(config.audioReactiveSettings);
+        }
+
+        // --- Export Settings ---
+        if (config.exportSettings) {
+            setExportSettings(config.exportSettings);
+        }
+
+        // --- Camera ---
+        if (config.camera) {
+            useCdStore.getState().setCamera(config.camera.position, config.camera.target);
+        }
+    };
+
     return (
         <div className="space-y-6 p-4 text-white overflow-y-auto h-full scrollbar-thin">
             <h2 className="font-bold text-sm uppercase tracking-wider text-white/50 mb-4 sticky top-0 bg-[#09090b] z-10 py-2">Visualizer Settings</h2>
+
+            {/* Preset Manager */}
+            <PresetManager
+                visualizerId="cd-spinner"
+                currentConfig={currentConfig}
+                onLoad={handlePresetLoad}
+            />
 
             {/* Rotation Speed */}
             <div className="space-y-2">
@@ -209,8 +275,14 @@ export function Controls() {
                         label="Load Cover Art"
                         onFileSelect={(file) => {
                             if (file) {
-                                const url = URL.createObjectURL(file);
-                                setCoverArt(url);
+                                // Convert to Base64 for persistence
+                                const reader = new FileReader();
+                                reader.onload = (e) => {
+                                    if (e.target?.result) {
+                                        setCoverArt(e.target.result as string);
+                                    }
+                                };
+                                reader.readAsDataURL(file);
                             } else {
                                 setCoverArt(null);
                             }

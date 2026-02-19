@@ -20,6 +20,12 @@ interface CdState {
     position: { x: number; y: number };
     scale: number;
 
+    // Camera State (Persisted)
+    camera: {
+        position: [number, number, number];
+        target: [number, number, number];
+    };
+
     // Audio Reactivity
     audioReactiveSettings: AudioReactiveSettings;
 
@@ -51,6 +57,7 @@ interface CdState {
     setRotationSpeed: (axis: 'x' | 'y' | 'z', value: number) => void;
     setPosition: (axis: 'x' | 'y', value: number) => void;
     setScale: (value: number) => void;
+    setCamera: (position: [number, number, number], target: [number, number, number]) => void;
 
     setAudioReactiveSettings: (settings: Partial<AudioReactiveSettings>) => void;
 
@@ -73,6 +80,10 @@ export const useCdStore = create<CdState>((set) => ({
     rotationSpeed: { x: 0, y: 0.01, z: 0 },
     position: { x: 0, y: 0 },
     scale: 1,
+    camera: {
+        position: [0, 5, 8],
+        target: [0, 0, 0]
+    },
 
     audioReactiveSettings: DEFAULT_REACTIVE_SETTINGS,
 
@@ -96,6 +107,8 @@ export const useCdStore = create<CdState>((set) => ({
         set((state) => ({ position: { ...state.position, [axis]: value } })),
 
     setScale: (value) => set({ scale: value }),
+
+    setCamera: (position, target) => set((state) => ({ camera: { position, target } })),
 
     setAudioReactiveSettings: (settings) =>
         set((state) => ({

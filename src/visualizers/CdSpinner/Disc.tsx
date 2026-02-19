@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAudioStore } from '../../store/useAudioStore';
@@ -142,10 +142,41 @@ export default function Disc() {
     );
 }
 
+import { ErrorBoundary } from '../../components/common/ErrorBoundary';
+
 function DiscLabel({ coverArt }: { coverArt: string | null }) {
-    console.log("DiscLabel rendering with coverArt:", coverArt);
-    if (coverArt) {
-        return <TextureLabel url={coverArt} />;
+    const [isValid, setIsValid] = useState<boolean>(true);
+    const [checkedUrl, setCheckedUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!coverArt) return;
+
+        // Only need to check blob URLs for expiration
+        if (coverArt.startsWith('blob:')) {
+            setIsValid(false); // Assume invalid until proven valid to prevent flash crash
+            setCheckedUrl(coverArt);
+
+            fetch(coverArt)
+                .then(res => {
+                    if (res.ok) setIsValid(true);
+                })
+                .catch(() => {
+                    console.warn("Detected expired blob URL in preset, ignoring cover art.");
+                    setIsValid(false);
+                });
+        } else {
+            // Data URLs and normal URLs are assumed valid
+            setIsValid(true);
+            setCheckedUrl(coverArt);
+        }
+    }, [coverArt]);
+
+    if (coverArt && isValid && checkedUrl === coverArt) {
+        return (
+            <ErrorBoundary fallback={null}>
+                <TextureLabel url={coverArt} />
+            </ErrorBoundary>
+        );
     }
 
     return (

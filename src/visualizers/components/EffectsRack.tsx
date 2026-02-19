@@ -18,13 +18,13 @@ import { Dither } from '../effects/Dither';
 
 export function EffectsRack() {
     const { bloom, glitch, pixelation, colorGrade, chromaticAberration, dither } = useFxStore();
-    const analyzerData = useAudioStore((state) => state.analyzerData);
 
     // Refs for effects to update them in useFrame
     const bloomRef = useRef<any>(null);
     const chromaticRef = useRef<any>(null);
 
     useFrame(() => {
+        const analyzerData = useAudioStore.getState().analyzerData;
         if (!analyzerData) return;
 
         // Calculate a simple "bass" or "energy" value from the analyzer data
