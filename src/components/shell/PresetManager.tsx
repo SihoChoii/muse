@@ -7,11 +7,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 interface PresetManagerProps {
     visualizerId: string;
-    currentConfig: any;
+    currentConfig?: any;
+    getCurrentConfig?: () => any;
     onLoad: (config: any) => void;
 }
 
-export function PresetManager({ visualizerId, currentConfig, onLoad }: PresetManagerProps) {
+export function PresetManager({ visualizerId, currentConfig, getCurrentConfig, onLoad }: PresetManagerProps) {
     const { savePreset, updatePreset, deletePreset, loadPreset, getPresetsForVisualizer } = usePresetStore();
 
     // Local state for UI
@@ -32,7 +33,8 @@ export function PresetManager({ visualizerId, currentConfig, onLoad }: PresetMan
 
     const handleSaveNew = () => {
         if (!newPresetName.trim()) return;
-        savePreset(newPresetName, visualizerId, currentConfig);
+        const configToSave = getCurrentConfig ? getCurrentConfig() : currentConfig;
+        savePreset(newPresetName, visualizerId, configToSave);
         setNewPresetName('');
         setFeedback('Saved!');
         // Find the newly created preset to set it as loaded (optional, but tricky since we don't return ID from savePreset yet)
@@ -41,7 +43,8 @@ export function PresetManager({ visualizerId, currentConfig, onLoad }: PresetMan
 
     const handleUpdate = () => {
         if (loadedPresetId) {
-            updatePreset(loadedPresetId, currentConfig);
+            const configToSave = getCurrentConfig ? getCurrentConfig() : currentConfig;
+            updatePreset(loadedPresetId, configToSave);
             setFeedback('Updated!');
         }
     };

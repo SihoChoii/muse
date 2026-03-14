@@ -37,8 +37,9 @@ export function EffectsRack() {
         // --- Bloom Reactivity ---
         if (bloomRef.current) {
             if (bloom.reactive) {
-                // Base intensity + signal boost
-                bloomRef.current.intensity = bloom.intensity + signal * 2.0;
+                // Base intensity + signal boost scaled by base intensity
+                // If intensity is 0, signal boost is 0
+                bloomRef.current.intensity = bloom.intensity + (signal * bloom.intensity * 2.0);
             } else {
                 bloomRef.current.intensity = bloom.intensity;
             }

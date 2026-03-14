@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useCdStore } from './store';
 
 export default function JewelCase({ children }: { children: React.ReactNode }) {
     // A simple box with transmission material
@@ -11,23 +12,32 @@ export default function JewelCase({ children }: { children: React.ReactNode }) {
     const height = 2.4; // same as CD diameter roughly
     const depth = 0.2;  // thin
 
+    const jewelCaseParams = useCdStore((state) => state.jewelCaseParams);
+
     return (
         <group>
-            <mesh position={[0, 0, 0]}>
-                <boxGeometry args={[width, height, depth]} />
-                <meshPhysicalMaterial
-                    color="#ffffff"
-                    transmission={1}  // Glass-like
-                    opacity={1}
-                    metalness={0}
-                    roughness={0}
-                    thickness={0.5}   // Refraction volume
-                    ior={1.5}         // Index of refraction for glass/plastic
-                    transparent={true}
-                />
-            </mesh>
+            {jewelCaseParams.visible && (
+                <group
+                    rotation={jewelCaseParams.rotation}
+                    scale={jewelCaseParams.scale}
+                >
+                    <mesh position={[0, 0, 0]}>
+                        <boxGeometry args={[width, height, depth]} />
+                        <meshPhysicalMaterial
+                            color={jewelCaseParams.color}
+                            transmission={jewelCaseParams.transmission}  // Glass-like
+                            opacity={jewelCaseParams.opacity}
+                            metalness={0}
+                            roughness={0}
+                            thickness={jewelCaseParams.thickness}   // Refraction volume
+                            ior={jewelCaseParams.ior}         // Index of refraction for glass/plastic
+                            transparent={true}
+                        />
+                    </mesh>
+                </group>
+            )}
 
-            {/* Place children (CD) inside */}
+            {/* Place children (CD) inside, completely independent of case transforms */}
             <group position={[0, 0, 0]}>
                 {children}
             </group>

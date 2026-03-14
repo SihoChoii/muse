@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useAudioStore } from '../../store/useAudioStore';
 import { useCdStore } from './store';
 import { processAudioData } from './useAudioReactor';
+import { MeshTransmissionMaterial } from '@react-three/drei';
 
 export default function Disc() {
     const groupRef = useRef<THREE.Group>(null);
@@ -12,7 +13,7 @@ export default function Disc() {
     const isPlaying = useAudioStore((state) => state.isPlaying);
 
     // CD Store
-    const { rotationSpeed, coverArt } = useCdStore();
+    const { rotationSpeed, coverArt, renderMode, materialParams } = useCdStore();
 
     // Reactor State (Previous value for envelope)
     const reactorState = useRef({ value: 0 });
@@ -30,15 +31,16 @@ export default function Disc() {
         shape.holes.push(holePath);
 
         const settings = {
-            depth: 0.05,
+            depth: materialParams.thickness,
             bevelEnabled: true,
             bevelThickness: 0.01,
             bevelSize: 0.01,
-            bevelSegments: 3
+            bevelSegments: 3,
+            curveSegments: materialParams.geometryResolution
         };
 
         return new THREE.ExtrudeGeometry(shape, settings);
-    }, []);
+    }, [materialParams.thickness, materialParams.geometryResolution]);
 
     const lastUpdateIdRef = useRef<number>(0);
 
@@ -48,7 +50,13 @@ export default function Disc() {
         // 1. Manual Rotation Override (from UI)
         const update = useCdStore.getState().rotationUpdate;
         if (update && update.id !== lastUpdateIdRef.current) {
-            groupRef.current.rotation[update.axis] = update.value;
+            if (update.axis !== undefined && update.value !== undefined) {
+                groupRef.current.rotation[update.axis] = update.value;
+            } else {
+                if (update.x !== undefined) groupRef.current.rotation.x = update.x;
+                if (update.y !== undefined) groupRef.current.rotation.y = update.y;
+                if (update.z !== undefined) groupRef.current.rotation.z = update.z;
+            }
             lastUpdateIdRef.current = update.id;
         }
 
@@ -100,51 +108,57 @@ export default function Disc() {
 
     return (
         <group ref={groupRef} rotation={[Math.PI / 2, 0, 0]}>
-            {/* The Disc Mesh */}
-            <mesh geometry={geometry}>
-                {/* Material 0: Sides (edges) - Silver/plastic */}
-                <meshPhysicalMaterial
-                    attach="material-0"
-                    color="#dddddd"
-                    metalness={0.8}
-                    roughness={0.2}
-                />
-
-                {/* Material 1: Top/Bottom faces */}
-                {/* We actually want different materials for Top (Label) vs Bottom (Data).
-            ExtrudeGeometry applies same material to top and bottom faces.
-            So we'll render TWO meshes. One for the disc body, one for the label on top.
-         */}
-            </mesh>
-
-            {/* Re-doing approach: 
-          Base Disc: Data side material everywhere.
-          Label Decal: A slightly elevated plane or cylinder cap on top.
-      */}
-
             {/* Base Disc (Data Side Look) */}
             <mesh geometry={geometry}>
-                <meshPhysicalMaterial
-                    color="#ffffff"
-                    metalness={1.0}
-                    roughness={0.15}
-                    iridescence={1}
-                    iridescenceIOR={1.33}
-                    iridescenceThicknessRange={[100, 400]}
-                    clearcoat={1}
-                    side={THREE.DoubleSide}
-                />
+                {renderMode === 'basic' && (
+                    <meshStandardMaterial
+                        color={materialParams.color}
+                        roughness={materialParams.roughness}
+                        metalness={materialParams.metalness}
+                        side={THREE.DoubleSide}
+                    />
+                )}
+                {renderMode === 'quality' && (
+                    <meshPhysicalMaterial
+                        color={materialParams.color}
+                        metalness={materialParams.metalness}
+                        roughness={materialParams.roughness}
+                        iridescence={materialParams.iridescence}
+                        iridescenceIOR={1.33}
+                        iridescenceThicknessRange={[100, 400]}
+                        clearcoat={materialParams.clearcoat}
+                        clearcoatRoughness={materialParams.clearcoatRoughness}
+                        side={THREE.DoubleSide}
+                    />
+                )}
+                {renderMode === 'raytraced' && (
+                    <MeshTransmissionMaterial
+                        color={materialParams.color}
+                        metalness={materialParams.metalness}
+                        roughness={materialParams.roughness}
+                        transmission={materialParams.transmission}
+                        ior={materialParams.ior}
+                        thickness={materialParams.thicknessVolume}
+                        background={new THREE.Color('#000000')}
+                        side={THREE.DoubleSide}
+                    />
+                )}
             </mesh>
 
             {/* Label Sticker - Just a ring/circle on top */}
-            <DiscLabel coverArt={coverArt} />
+            {/* ExtrudeGeometry extrudes from 0 to depth, but bevel adds to both sides.
+                Front face Z = thickness + bevelThickness (which is 0.01).
+                We add a slightly larger offset (0.005) to ensure it completely clears the geometry without z-fighting. */}
+            <group position={[0, 0, materialParams.thickness + 0.015]}>
+                <DiscLabel coverArt={coverArt} resolution={materialParams.geometryResolution} />
+            </group>
         </group>
     );
 }
 
 import { ErrorBoundary } from '../../components/common/ErrorBoundary';
 
-function DiscLabel({ coverArt }: { coverArt: string | null }) {
+function DiscLabel({ coverArt, resolution = 64 }: { coverArt: string | null, resolution?: number }) {
     const [isValid, setIsValid] = useState<boolean>(true);
     const [checkedUrl, setCheckedUrl] = useState<string | null>(null);
 
@@ -174,14 +188,14 @@ function DiscLabel({ coverArt }: { coverArt: string | null }) {
     if (coverArt && isValid && checkedUrl === coverArt) {
         return (
             <ErrorBoundary fallback={null}>
-                <TextureLabel url={coverArt} />
+                <TextureLabel url={coverArt} resolution={resolution} />
             </ErrorBoundary>
         );
     }
 
     return (
-        <mesh position={[0, 0, 0.07]}>
-            <ringGeometry args={[0.35, 1.2, 64]} />
+        <mesh>
+            <ringGeometry args={[0.35, 1.2, resolution]} />
             <meshStandardMaterial
                 color="#ff4400"
                 roughness={0.4}
@@ -195,13 +209,13 @@ function DiscLabel({ coverArt }: { coverArt: string | null }) {
 // Sub-component to safely use the hook
 import { useTexture } from '@react-three/drei';
 
-function TextureLabel({ url }: { url: string }) {
+function TextureLabel({ url, resolution = 64 }: { url: string, resolution?: number }) {
     const texture = useTexture(url);
     const meshRef = useRef<THREE.Mesh>(null);
 
     // Fix texture encoding/orientation if needed
     texture.center.set(0.5, 0.5);
-    texture.rotation = -Math.PI / 2; // Adjust if needed
+    texture.rotation = Math.PI / 2; // Adjusted to rotate 180 degrees from before (-Math.PI / 2)
 
     // Create a shape matching the CD for the label
     const shape = useMemo(() => {
@@ -215,7 +229,7 @@ function TextureLabel({ url }: { url: string }) {
 
     // Manually fix UVs to map [-1.2, 1.2] range to [0, 1] for the texture
     const geometry = useMemo(() => {
-        const geo = new THREE.ShapeGeometry(shape, 64);
+        const geo = new THREE.ShapeGeometry(shape, resolution);
         const posAttribute = geo.attributes.position;
         const uvAttribute = geo.attributes.uv;
         const boundingBoxSize = 2.4; // 1.2 radius * 2
@@ -234,11 +248,16 @@ function TextureLabel({ url }: { url: string }) {
 
         uvAttribute.needsUpdate = true;
         return geo;
-    }, [shape]);
+    }, [shape, resolution]);
 
     return (
-        <mesh ref={meshRef} position={[0, 0, 0.07]} geometry={geometry}>
-            <meshBasicMaterial side={THREE.FrontSide} map={texture} toneMapped={false} />
+        <mesh ref={meshRef} geometry={geometry}>
+            <meshBasicMaterial
+                side={THREE.FrontSide}
+                map={texture}
+                toneMapped={false}
+                alphaTest={0.5} // Keeps it in opaque pass but allows cutout PNGs
+            />
         </mesh>
     );
 }

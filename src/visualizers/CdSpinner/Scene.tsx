@@ -7,7 +7,7 @@ import Disc from './Disc';
 import JewelCase from './JewelCase';
 import { useCdStore } from './store';
 import { useThree } from '@react-three/fiber';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
 function CameraSync() {
@@ -31,21 +31,34 @@ function CameraSync() {
         }
     }, [savedCamera, camera]); // Dependencies to re-run when store changes
 
+    // Sync Scene -> Store safely on change (zoom/pan/rotate)
+    const timeoutRef = useRef<number | null>(null);
+    const handleCameraChange = useCallback(() => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = window.setTimeout(() => {
+            if (controlsRef.current) {
+                setCamera(
+                    camera.position.toArray(),
+                    controlsRef.current.target.toArray()
+                );
+            }
+        }, 100);
+    }, [camera, setCamera]);
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        };
+    }, []);
+
     return (
         <OrbitControls
             ref={controlsRef}
             makeDefault
             minPolarAngle={0}
             maxPolarAngle={Math.PI / 2}
-            onEnd={() => {
-                // Sync Scene -> Store (On User Interaction End)
-                if (controlsRef.current) {
-                    setCamera(
-                        camera.position.toArray(),
-                        controlsRef.current.target.toArray()
-                    );
-                }
-            }}
+            onChange={handleCameraChange}
+            onEnd={handleCameraChange}
         />
     );
 }

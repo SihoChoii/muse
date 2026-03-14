@@ -66,7 +66,7 @@ const LOG_RANGE = LOG_MAX_VAL - LOG_MIN_VAL;
 
 export function ReactivityPanel() {
     const { containerRef, canvasRef, size } = useCanvasSize();
-    const { analyzerData } = useAudioStore();
+    const { analyzerData, isPlaying } = useAudioStore();
     const { audioReactiveSettings, setAudioReactiveSettings } = useCdStore();
 
     const signal = useAudioReactor(analyzerData, audioReactiveSettings);
@@ -439,8 +439,16 @@ export function ReactivityPanel() {
                 ref={containerRef}
                 className="relative h-48 w-full border border-white/10 rounded-lg overflow-hidden bg-black shadow-lg"
             >
-                <div className="absolute top-2 right-2 text-[10px] text-white/30 font-mono pointer-events-none">
-                    Scroll to adjust Width
+                <div className="absolute top-2 right-2 flex items-center gap-2 z-10">
+                    {!isPlaying && (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/50 border border-white/10 text-[10px] text-white/50 backdrop-blur-sm pointer-events-none">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-500/50" />
+                            No audio playing
+                        </div>
+                    )}
+                    <div className="text-[10px] text-white/30 font-mono pointer-events-none">
+                        Scroll to adjust Width
+                    </div>
                 </div>
                 <canvas
                     ref={canvasRef}
