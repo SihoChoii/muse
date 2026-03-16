@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { useAudioStore } from '../../store/useAudioStore';
+import { useExportStore } from '../../store/useExportStore';
 import { Upload } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -19,7 +20,8 @@ export const FilePicker: React.FC<FilePickerProps> = ({
     label = "Load Audio",
     file
 }) => {
-    const { setCurrentTrack } = useAudioStore();
+    const setCurrentTrack = useAudioStore((state) => state.setCurrentTrack);
+    const resetExport = useExportStore((state) => state.resetJob);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -28,8 +30,8 @@ export const FilePicker: React.FC<FilePickerProps> = ({
             if (onFileSelect) {
                 onFileSelect(selectedFile);
             } else {
-                // Default behavior if no handler provided (legacy support or default shell behavior)
                 setCurrentTrack(selectedFile);
+                resetExport();
             }
         }
     };

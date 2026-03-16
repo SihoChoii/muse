@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
-import { useCdStore } from './store';
-import { usePresetStore } from '../../store/usePresetStore';
-import { useVideoRenderer } from '../../hooks/useVideoRenderer';
-import { FilePicker } from '../../components/shell/FilePicker';
-import { RefreshCcw } from 'lucide-react';
-import { ReactivityPanel } from './ReactivityPanel';
-import { PresetManager } from '../../components/shell/PresetManager';
+import { useEffect, useRef } from 'react'
+import { RefreshCcw } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { PresetManager } from '../../components/shell/PresetManager'
+import { FilePicker } from '../../components/shell/FilePicker'
+import type { VisualizerConfig } from '../../types/visualizerConfig'
+import { type RenderMode, useCdStore, loadCdPresetConfig } from './store'
+import { ReactivityPanel } from './ReactivityPanel'
+
+const RENDER_MODES: RenderMode[] = ['basic', 'quality', 'raytraced']
 
 const SliderRow = ({
     label,
@@ -45,9 +47,15 @@ const SliderRow = ({
             className="w-16 bg-white/10 rounded px-2 py-0.5 text-xs border border-transparent focus:border-white/20 outline-none hover:bg-white/20 transition-colors text-right"
         />
     </div>
-);
+)
 
-const SectionHeader = ({ title, onReset }: { title: string, onReset?: () => void }) => (
+const SectionHeader = ({
+  title,
+  onReset,
+}: {
+  title: string
+  onReset?: () => void
+}) => (
     <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-semibold text-white/70">{title}</h3>
         {onReset && (
@@ -60,156 +68,124 @@ const SectionHeader = ({ title, onReset }: { title: string, onReset?: () => void
             </button>
         )}
     </div>
-);
-
-let hasLoadedBasePreset = false;
+)
 
 export function Controls() {
-    const { isRendering, progress, startExport, stopExport } = useVideoRenderer();
-    const [captureSpeed, setCaptureSpeed] = useState(0.5);
+  const {
+    rotationSpeed,
+    position,
+    scale,
+    coverArt,
+    background,
+    renderMode,
+    materialParams,
+    jewelCaseParams,
+    setRotationSpeed,
+    setPosition,
+    setScale,
+    setCoverArt,
+    setBackground,
+    setRenderMode,
+    setMaterialParams,
+    setJewelCaseParams,
+    setOnFrameRotation,
+    setRotation,
+    resetPosition,
+  } = useCdStore(
+    useShallow((state) => ({
+      rotationSpeed: state.rotationSpeed,
+      position: state.position,
+      scale: state.scale,
+      coverArt: state.coverArt,
+      background: state.background,
+      renderMode: state.renderMode,
+      materialParams: state.materialParams,
+      jewelCaseParams: state.jewelCaseParams,
+      setRotationSpeed: state.setRotationSpeed,
+      setPosition: state.setPosition,
+      setScale: state.setScale,
+      setCoverArt: state.setCoverArt,
+      setBackground: state.setBackground,
+      setRenderMode: state.setRenderMode,
+      setMaterialParams: state.setMaterialParams,
+      setJewelCaseParams: state.setJewelCaseParams,
+      setOnFrameRotation: state.setOnFrameRotation,
+      setRotation: state.setRotation,
+      resetPosition: state.resetPosition,
+    })),
+  )
+  const xRotRef = useRef<{
+    slider: HTMLInputElement | null
+    number: HTMLInputElement | null
+  }>({ slider: null, number: null })
+  const yRotRef = useRef<{
+    slider: HTMLInputElement | null
+    number: HTMLInputElement | null
+  }>({ slider: null, number: null })
+  const zRotRef = useRef<{
+    slider: HTMLInputElement | null
+    number: HTMLInputElement | null
+  }>({ slider: null, number: null })
+  const currentRotationRef = useRef({ x: 0, y: 0, z: 0 })
 
-    const {
-        rotationSpeed, position, scale,
-        setRotationSpeed, setPosition, setScale,
-
-        coverArt, background, exportSettings, renderMode, materialParams, jewelCaseParams,
-        setCoverArt, setBackground, setExportSettings, setRenderMode, setMaterialParams, setJewelCaseParams,
-
-        setOnFrameRotation, setRotation, resetPosition
-    } = useCdStore();
-
-    // Refs for Live Rotation Inputs to avoid re-rendering this component 60fps
-    const xRotRef = useRef<{ slider: HTMLInputElement | null, number: HTMLInputElement | null }>({ slider: null, number: null });
-    const yRotRef = useRef<{ slider: HTMLInputElement | null, number: HTMLInputElement | null }>({ slider: null, number: null });
-    const zRotRef = useRef<{ slider: HTMLInputElement | null, number: HTMLInputElement | null }>({ slider: null, number: null });
-    const currentRotationRef = useRef<{ x: number, y: number, z: number }>({ x: 0, y: 0, z: 0 });
-
-    // Setup Live Rotation Link
-    useEffect(() => {
-        setOnFrameRotation((x, y, z) => {
-            // Convert Radians to Degrees (0-360) for display
-            // We want continuous rotation for the slider if possible, but 0-360 is safer for "Controls"
-            // The user wants "actual rotation".
-            const toDeg = (rad: number) => {
-                let deg = (rad * 180 / Math.PI) % 360;
-                if (deg < 0) deg += 360;
-                return deg;
-            };
-
-            const xDeg = toDeg(x);
-            const yDeg = toDeg(y);
-            const zDeg = toDeg(z);
-
-            currentRotationRef.current = { x, y, z };
-
-            // Update DOM directly
-            if (xRotRef.current.slider) xRotRef.current.slider.value = xDeg.toString();
-            if (xRotRef.current.number) xRotRef.current.number.value = xDeg.toFixed(1);
-
-            if (yRotRef.current.slider) yRotRef.current.slider.value = yDeg.toString();
-            if (yRotRef.current.number) yRotRef.current.number.value = yDeg.toFixed(1);
-
-            if (zRotRef.current.slider) zRotRef.current.slider.value = zDeg.toString();
-            if (zRotRef.current.number) zRotRef.current.number.value = zDeg.toFixed(1);
-        });
-
-        // Cleanup
-        return () => setOnFrameRotation(null);
-    }, [setOnFrameRotation]);
-
-    const handleManualRotation = (axis: 'x' | 'y' | 'z', deg: number) => {
-        // Convert Degrees to Radians
-        const rad = deg * Math.PI / 180;
-        setRotation(axis, rad);
-    };
-
-    // Preset Integration
-    // "Save everything" - capture all state that defines the visualizer's look and behavior
-    const getCurrentConfig = () => {
-        const state = useCdStore.getState();
-        return {
-            rotationSpeed: state.rotationSpeed,
-            position: state.position,
-            scale: state.scale,
-            coverArt: state.coverArt,
-            background: state.background,
-            renderMode: state.renderMode,
-            materialParams: state.materialParams,
-            jewelCaseParams: state.jewelCaseParams,
-            audioReactiveSettings: state.audioReactiveSettings, // Grab latest exactly on save
-            exportSettings: state.exportSettings,
-            camera: state.camera, // Capture current camera state exactly on save
-            rotation: currentRotationRef.current // Capture precise live CD rotation exactly on save
-        };
-    };
-
-    const handlePresetLoad = (config: any) => {
-        if (!config) return;
-
-        // --- Core Transform ---
-        if (config.rotation) {
-            useCdStore.getState().setRotations(config.rotation);
+  useEffect(() => {
+    setOnFrameRotation((x, y, z) => {
+      const toDegrees = (radians: number) => {
+        let degrees = ((radians * 180) / Math.PI) % 360
+        if (degrees < 0) {
+          degrees += 360
         }
-        if (config.rotationSpeed) {
-            setRotationSpeed('x', config.rotationSpeed.x);
-            setRotationSpeed('y', config.rotationSpeed.y);
-            setRotationSpeed('z', config.rotationSpeed.z);
-        }
-        if (config.position) {
-            setPosition('x', config.position.x);
-            setPosition('y', config.position.y);
-        }
-        if (config.scale !== undefined) setScale(config.scale);
+        return degrees
+      }
 
-        // --- Visuals ---
-        // Cover Art: Handle null explicitly (if preset cleared it)
-        if (config.coverArt !== undefined) setCoverArt(config.coverArt);
+      const xDegrees = toDegrees(x)
+      const yDegrees = toDegrees(y)
+      const zDegrees = toDegrees(z)
+      currentRotationRef.current = { x, y, z }
 
-        if (config.background) {
-            if (typeof config.background === 'object' && config.background.type) {
-                setBackground(config.background.type, config.background.value);
-            }
-        }
+      if (xRotRef.current.slider) {
+        xRotRef.current.slider.value = xDegrees.toString()
+      }
+      if (xRotRef.current.number) {
+        xRotRef.current.number.value = xDegrees.toFixed(1)
+      }
+      if (yRotRef.current.slider) {
+        yRotRef.current.slider.value = yDegrees.toString()
+      }
+      if (yRotRef.current.number) {
+        yRotRef.current.number.value = yDegrees.toFixed(1)
+      }
+      if (zRotRef.current.slider) {
+        zRotRef.current.slider.value = zDegrees.toString()
+      }
+      if (zRotRef.current.number) {
+        zRotRef.current.number.value = zDegrees.toFixed(1)
+      }
+    })
 
-        if (config.renderMode) setRenderMode(config.renderMode);
-        if (config.materialParams) setMaterialParams(config.materialParams);
-        if (config.jewelCaseParams) setJewelCaseParams(config.jewelCaseParams);
+    return () => setOnFrameRotation(null)
+  }, [setOnFrameRotation])
 
-        // --- Reactivity ---
-        if (config.audioReactiveSettings) {
-            // We use a specific setter for reactivity to merge or overwrite
-            // The store has setAudioReactiveSettings which does a partial merge.
-            // For a preset load, we probably want to overwrite significant parts or all of it.
-            // Let's pass the whole object.
-            useCdStore.getState().setAudioReactiveSettings(config.audioReactiveSettings);
-        }
+  const handleManualRotation = (axis: 'x' | 'y' | 'z', degrees: number) => {
+    setRotation(axis, (degrees * Math.PI) / 180)
+  }
 
-        // --- Export Settings ---
-        if (config.exportSettings) {
-            setExportSettings(config.exportSettings);
-        }
-
-        // --- Camera ---
-        if (config.camera) {
-            useCdStore.getState().setCamera(config.camera.position, config.camera.target);
-        }
-    };
-
-    // Auto-load "Base" preset on mount if it exists (only once per app load)
-    useEffect(() => {
-        if (hasLoadedBasePreset) return;
-        hasLoadedBasePreset = true;
-
-        const presets = usePresetStore.getState().getPresetsForVisualizer('cd-spinner');
-        const basePreset = presets.find(p => p.name.toLowerCase() === 'base');
-
-        if (basePreset) {
-            const config = usePresetStore.getState().loadPreset(basePreset.id);
-            if (config) {
-                handlePresetLoad(config);
-            }
-        }
-    }, []);
+  const getCurrentConfig = (): VisualizerConfig => {
+    const state = useCdStore.getState()
+    return {
+      rotationSpeed: state.rotationSpeed,
+      position: state.position,
+      scale: state.scale,
+      coverArt: state.coverArt,
+      background: state.background,
+      renderMode: state.renderMode,
+      materialParams: state.materialParams,
+      jewelCaseParams: state.jewelCaseParams,
+      audioReactiveSettings: state.audioReactiveSettings,
+      camera: state.camera,
+      rotation: currentRotationRef.current,
+    }
+  }
 
     return (
         <div className="space-y-6 p-4 text-white overflow-y-auto h-full scrollbar-thin">
@@ -219,7 +195,7 @@ export function Controls() {
             <PresetManager
                 visualizerId="cd-spinner"
                 getCurrentConfig={getCurrentConfig}
-                onLoad={handlePresetLoad}
+                onLoad={loadCdPresetConfig}
             />
 
             {/* Rotation Speed */}
@@ -305,10 +281,10 @@ export function Controls() {
                 <div className="space-y-2">
                     <h3 className="text-xs font-semibold text-white/70">Render Mode</h3>
                     <div className="flex gap-2 text-[10px] bg-white/5 p-1 rounded-lg">
-                        {['basic', 'quality', 'raytraced'].map(mode => (
+                        {RENDER_MODES.map((mode) => (
                             <button
                                 key={mode}
-                                onClick={() => setRenderMode(mode as any)}
+                                onClick={() => setRenderMode(mode)}
                                 className={`flex-1 py-1.5 rounded text-center transition-colors capitalize ${renderMode === mode ? 'bg-white text-black font-medium' : 'hover:bg-white/10 text-white/70'}`}
                             >
                                 {mode}
@@ -424,7 +400,7 @@ export function Controls() {
                 <div className="space-y-2">
                     <h3 className="text-xs font-semibold text-white/70">Cover Art</h3>
                     <FilePicker
-                        file={coverArt ? { name: 'Cover Art' } as any : null}
+                        file={coverArt ? { name: 'Cover Art' } : null}
                         accept="image/*"
                         label="Load Cover Art"
                         onFileSelect={(file) => {
@@ -471,76 +447,6 @@ export function Controls() {
                         />
                     )}
                 </div>
-            </div>
-
-            {/* Video Export */}
-            <div className="pt-4 border-t border-white/10">
-                <h3 className="text-xs font-semibold text-white/70 mb-2">Export Video</h3>
-                {isRendering ? (
-                    <div className="space-y-3">
-                        <div className="space-y-2">
-                            <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-blue-500 transition-all duration-300"
-                                    style={{ width: `${progress}%` }}
-                                />
-                            </div>
-                            <p className="text-xs text-center text-white/50">Rendering... {Math.round(progress)}%</p>
-                        </div>
-                        <button
-                            onClick={stopExport}
-                            className="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-red-500 rounded-lg text-xs font-medium transition-colors border border-red-500/10"
-                        >
-                            Stop & Finish
-                        </button>
-                    </div>
-                ) : (
-                    <div className="space-y-3">
-                        {/* Format Settings */}
-                        <div className="flex items-center justify-between gap-2 p-2 bg-white/5 rounded-lg">
-                            <label className="text-xs text-white/70">Format</label>
-                            <div className="flex gap-1 text-[10px]">
-                                <button
-                                    onClick={() => setExportSettings({ format: 'mp4', transparent: false })}
-                                    className={`px-2 py-1 rounded transition-colors ${exportSettings.format === 'mp4' ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
-                                >
-                                    MP4
-                                </button>
-                                <button
-                                    onClick={() => setExportSettings({ format: 'webm' })}
-                                    className={`px-2 py-1 rounded transition-colors ${exportSettings.format === 'webm' ? 'bg-green-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
-                                >
-                                    WebM
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between p-2 bg-white/5 rounded-lg">
-                            <label className="text-xs text-white/70">Transparent Background</label>
-                            <input
-                                type="checkbox"
-                                checked={exportSettings.transparent}
-                                disabled={exportSettings.format === 'mp4'}
-                                onChange={(e) => setExportSettings({ transparent: e.target.checked })}
-                                className="toggle"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs text-white/70">
-                                <span>Capture Speed</span>
-                                <span>{captureSpeed}x</span>
-                            </div>
-                            <SliderRow value={captureSpeed} min={0.1} max={1} step={0.1} onChange={setCaptureSpeed} />
-                        </div>
-                        <button
-                            onClick={() => startExport(captureSpeed)}
-                            className="w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors border border-white/5"
-                        >
-                            Start Capture
-                        </button>
-                    </div>
-                )}
             </div>
         </div>
     );

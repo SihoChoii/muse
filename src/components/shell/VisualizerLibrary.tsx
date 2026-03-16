@@ -5,7 +5,9 @@ import { PlayCircle } from 'lucide-react';
 import { LoadButton } from './LoadButton';
 
 export function VisualizerLibrary() {
-    const { setActiveVisualizerId } = useAudioStore();
+    const setActiveVisualizerId = useAudioStore(
+        (state) => state.setActiveVisualizerId,
+    );
 
     return (
         <div className="h-full w-full overflow-y-auto p-8 bg-black bg-noise text-white">

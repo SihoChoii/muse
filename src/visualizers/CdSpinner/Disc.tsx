@@ -2,21 +2,30 @@ import { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAudioStore } from '../../store/useAudioStore';
+import { useExportStore } from '../../store/useExportStore';
 import { useCdStore } from './store';
 import { processAudioData } from './useAudioReactor';
 import { MeshTransmissionMaterial } from '@react-three/drei';
+import { useShallow } from 'zustand/react/shallow';
+import { useVisualizerSurfaceKind } from '../../components/shell/VisualizerSurfaceContext';
 
 export default function Disc() {
     const groupRef = useRef<THREE.Group>(null);
+    const transmissionBackground = useMemo(() => new THREE.Color('#000000'), []);
+    const surfaceKind = useVisualizerSurfaceKind();
 
-    // Audio Store
     const isPlaying = useAudioStore((state) => state.isPlaying);
 
-    // CD Store
-    const { rotationSpeed, coverArt, renderMode, materialParams } = useCdStore();
+    const { rotationSpeed, coverArt, renderMode, materialParams } = useCdStore(useShallow((state) => ({
+        rotationSpeed: state.rotationSpeed,
+        coverArt: state.coverArt,
+        renderMode: state.renderMode,
+        materialParams: state.materialParams,
+    })));
 
     // Reactor State (Previous value for envelope)
     const reactorState = useRef({ value: 0 });
+    const lastExportFrameRef = useRef<number | null>(null);
 
     // Create CD Geometry (Cylinder with hole) using ExtrudeGeometry
     const geometry = useMemo(() => {
@@ -44,8 +53,19 @@ export default function Disc() {
 
     const lastUpdateIdRef = useRef<number>(0);
 
-    useFrame(() => {
+    useFrame((_, delta) => {
         if (!groupRef.current) return;
+
+        const exportTimeline = useExportStore.getState().timeline;
+        const exportActive = exportTimeline !== null;
+        const exportFrameIndex = exportTimeline?.frameIndex ?? null;
+        if (
+            exportActive &&
+            exportFrameIndex !== null &&
+            lastExportFrameRef.current === exportFrameIndex
+        ) {
+            return;
+        }
 
         // 1. Manual Rotation Override (from UI)
         const update = useCdStore.getState().rotationUpdate;
@@ -61,15 +81,20 @@ export default function Disc() {
         }
 
         // 2. Continuous Rotation (Speed)
-        if (isPlaying) {
-            groupRef.current.rotation.x += rotationSpeed.x;
-            groupRef.current.rotation.y += rotationSpeed.y;
-            groupRef.current.rotation.z += rotationSpeed.z;
+        const frameScale = exportActive
+            ? (exportTimeline?.deltaSeconds ?? 1 / 60) * 60
+            : delta * 60;
+        const activePlayback = exportActive || isPlaying;
+
+        if (activePlayback) {
+            groupRef.current.rotation.x += rotationSpeed.x * frameScale;
+            groupRef.current.rotation.y += rotationSpeed.y * frameScale;
+            groupRef.current.rotation.z += rotationSpeed.z * frameScale;
         }
 
         // 3. Report Live Rotation (to UI)
         const onFrameRotation = useCdStore.getState().onFrameRotation;
-        if (onFrameRotation) {
+        if (onFrameRotation && surfaceKind === 'interactive') {
             onFrameRotation(
                 groupRef.current.rotation.x,
                 groupRef.current.rotation.y,
@@ -78,7 +103,7 @@ export default function Disc() {
         }
 
         // Reactivity
-        const data = useAudioStore.getState().analyzerData;
+        const data = exportTimeline?.analyzerData ?? useAudioStore.getState().analyzerData;
 
         if (data && data.length > 0) {
             const settings = useCdStore.getState().audioReactiveSettings;
@@ -98,11 +123,17 @@ export default function Disc() {
             // Scale down significantly for subtler effects (0-1 slider -> 0-0.1 effect)
             const speedAmt = (settings.rotationSensitivity ?? 0.1) * 0.1;
 
-            if (isPlaying && Math.abs(rotationSpeed.z) > 0.00001) {
+            if (activePlayback && Math.abs(rotationSpeed.z) > 0.00001) {
                 const direction = Math.sign(rotationSpeed.z);
                 // Boost rotation
-                groupRef.current.rotation.z += direction * (signal * speedAmt);
+                groupRef.current.rotation.z += direction * (signal * speedAmt * frameScale);
             }
+        }
+
+        if (exportActive) {
+            lastExportFrameRef.current = exportFrameIndex;
+        } else {
+            lastExportFrameRef.current = null;
         }
     });
 
@@ -139,7 +170,7 @@ export default function Disc() {
                         transmission={materialParams.transmission}
                         ior={materialParams.ior}
                         thickness={materialParams.thicknessVolume}
-                        background={new THREE.Color('#000000')}
+                        background={transmissionBackground}
                         side={THREE.DoubleSide}
                     />
                 )}

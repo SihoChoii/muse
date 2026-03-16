@@ -1,7 +1,9 @@
+import { Activity, Droplets, Layers, Monitor, Palette, Zap } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { cn } from '../../lib/utils'
+import { type ColorGradeMode, useFxStore } from '../../store/useFxStore'
 
-import { useFxStore } from '../../store/useFxStore';
-import { Zap, Activity, Layers, Monitor, Droplets, Palette } from 'lucide-react';
-import { cn } from '../../lib/utils'; // Assuming standard utils exist, if not I'll remove or use clsx directly
+const COLOR_GRADE_MODES: ColorGradeMode[] = ['normal', 'bw', 'sepia', 'cyberpunk']
 
 // Simple Slider Component
 const Slider = ({ value, min, max, step, onChange, label }: { value: number, min: number, max: number, step: number, onChange: (val: number) => void, label?: string }) => (
@@ -53,7 +55,33 @@ const ReactivityToggle = ({ active, onClick }: { active: boolean, onClick: () =>
 );
 
 export function FxPanel() {
-    const { bloom, glitch, pixelation, colorGrade, chromaticAberration, dither, setBloom, setGlitch, setPixelation, setColorGrade, setChromaticAberration, setDither } = useFxStore();
+    const {
+        bloom,
+        glitch,
+        pixelation,
+        colorGrade,
+        chromaticAberration,
+        dither,
+        setBloom,
+        setGlitch,
+        setPixelation,
+        setColorGrade,
+        setChromaticAberration,
+        setDither,
+    } = useFxStore(useShallow((state) => ({
+        bloom: state.bloom,
+        glitch: state.glitch,
+        pixelation: state.pixelation,
+        colorGrade: state.colorGrade,
+        chromaticAberration: state.chromaticAberration,
+        dither: state.dither,
+        setBloom: state.setBloom,
+        setGlitch: state.setGlitch,
+        setPixelation: state.setPixelation,
+        setColorGrade: state.setColorGrade,
+        setChromaticAberration: state.setChromaticAberration,
+        setDither: state.setDither,
+    })));
 
     return (
         <div className="flex flex-col gap-4 p-4 text-white">
@@ -163,10 +191,10 @@ export function FxPanel() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mt-2">
-                    {['normal', 'bw', 'sepia', 'cyberpunk'].map((mode) => (
+                    {COLOR_GRADE_MODES.map((mode) => (
                         <button
                             key={mode}
-                            onClick={() => setColorGrade({ mode: mode as any })}
+                            onClick={() => setColorGrade({ mode })}
                             className={cn(
                                 "px-3 py-2 rounded-md text-xs font-medium transition-all capitalize",
                                 colorGrade.mode === mode

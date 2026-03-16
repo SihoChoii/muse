@@ -4,7 +4,7 @@ import { AudioReactiveSettings } from './store';
 // Helper function for usage inside requestAnimationFrame/useFrame loops
 // where we don't want to trigger React renders
 export const processAudioData = (
-    data: Uint8Array | null,
+    data: Uint8Array<ArrayBufferLike> | null,
     settings: AudioReactiveSettings,
     state: { value: number }
 ) => {
@@ -40,7 +40,7 @@ export const processAudioData = (
     const avg = count > 0 ? sum / count : 0;
 
     // Normalize to 0-1 (Input data is Uint8 0-255)
-    let rawSignal = avg / 255;
+    const rawSignal = avg / 255;
 
     // 2. Gain
     let signal = rawSignal * gain;
@@ -68,7 +68,7 @@ export const processAudioData = (
 };
 
 export const useAudioReactor = (
-    data: Uint8Array | null,
+    data: Uint8Array<ArrayBufferLike> | null,
     settings: AudioReactiveSettings
 ) => {
     // We use a ref to hold the previous value state across renders

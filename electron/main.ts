@@ -1,10 +1,16 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { Notification, app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { VideoWriter } from './VideoWriter'
-// import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import type {
+  RenderCommandResult,
+  RenderFinishRequest,
+  RenderFinishResult,
+  RenderFramePayload,
+  RenderStartRequest,
+  RenderStartResult,
+} from '../src/types/export'
 
-// const require = createRequire(import.meta.url)
 const __dirname_esm = path.dirname(fileURLToPath(import.meta.url))
 
 // The built directory structure
@@ -29,21 +35,15 @@ let win: BrowserWindow | null
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC, 'app-icon.png'),
     webPreferences: {
       preload: path.join(__dirname_esm, 'preload.mjs'),
     },
   })
 
-  // Test active push message to Renderer-process.
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', (new Date).toLocaleString())
-  })
-
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 }
@@ -67,44 +67,124 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
-  createWindow();
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(path.join(process.env.VITE_PUBLIC, 'app-icon.png'))
+  }
 
-  // Video Writer Instance
-  const videoWriter = new VideoWriter();
+  createWindow()
 
-  // IPC Handlers
-  ipcMain.handle('render-start', async (_, { outputPath, audioPath, fps, options }) => {
+  const videoWriter = new VideoWriter()
+  let activeOutputPath: string | null = null
+
+  ipcMain.handle('render-start', async (_, request: RenderStartRequest): Promise<RenderStartResult> => {
     try {
-      await videoWriter.start(outputPath, audioPath, fps, options);
-      return { success: true };
+      const extension = request.format === 'webm' ? 'webm' : 'mp4'
+      const defaultPath = path.join(
+        app.getPath('downloads'),
+        `muse-export-${Date.now()}.${extension}`,
+      )
+      const dialogOptions = {
+        defaultPath,
+        filters: [
+          request.format === 'webm'
+            ? { name: 'WebM Video', extensions: ['webm'] }
+            : { name: 'MP4 Video', extensions: ['mp4'] },
+        ],
+      }
+      const saveResult = win
+        ? await dialog.showSaveDialog(win, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions)
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, cancelled: true }
+      }
+
+      await videoWriter.start({
+        outputPath: saveResult.filePath,
+        audioPath: request.audioPath,
+        fps: request.fps,
+        format: request.format,
+        transparent: request.transparent,
+        includeAudio: request.includeAudio,
+        profile: request.profile,
+        compression: request.compression,
+      })
+      activeOutputPath = saveResult.filePath
+
+      return {
+        success: true,
+        cancelled: false,
+        outputPath: saveResult.filePath,
+      }
     } catch (error) {
-      console.error('Render start failed:', error);
-      return { success: false, error: error };
+      console.error('Render start failed:', error)
+      return {
+        success: false,
+        cancelled: false,
+        error: error instanceof Error ? error.message : 'Unknown render start failure',
+      }
     }
-  });
+  })
 
-  ipcMain.handle('render-frame', (_, data, count = 1) => {
-    // Data usually comes as Base64 string from canvas.toDataURL
-    // We need to strip the header "data:image/jpeg;base64," if present
-    // But assuming we pass Buffer from preload or just base64 string.
-    // Let's expect ArrayBuffer or Base64 string.
-
-    let buffer: Buffer;
-    if (typeof data === 'string') {
-      const base64Data = data.replace(/^data:image\/\w+;base64,/, "");
-      buffer = Buffer.from(base64Data, 'base64');
-    } else {
-      buffer = Buffer.from(data);
+  ipcMain.handle('render-frame', async (_, payload: RenderFramePayload): Promise<RenderCommandResult> => {
+    try {
+      const buffer = Buffer.from(payload.data)
+      videoWriter.writeFrame(buffer, payload.repeat ?? 1)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unable to write render frame',
+      }
     }
+  })
 
-    // Write the frame 'count' times
-    for (let i = 0; i < count; i++) {
-      videoWriter.writeFrame(buffer);
+  ipcMain.handle(
+    'render-finish',
+    async (_, request: RenderFinishRequest): Promise<RenderFinishResult> => {
+    try {
+      const finishResult = await videoWriter.finish({
+        cancelled: request.cancelled,
+      })
+      const resolvedOutputPath = finishResult.outputPath ?? activeOutputPath ?? undefined
+
+      if (
+        finishResult.completionKind === 'complete' &&
+        resolvedOutputPath &&
+        Notification.isSupported()
+      ) {
+        new Notification({
+          title: 'Muse render complete',
+          body: path.basename(resolvedOutputPath),
+        }).show()
+      }
+
+      return {
+        success: true,
+        completionKind: finishResult.completionKind,
+        outputPath: resolvedOutputPath,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unable to finish render',
+      }
+    } finally {
+      activeOutputPath = null
     }
-  });
+    },
+  )
 
-  ipcMain.handle('render-finish', async () => {
-    await videoWriter.finish();
-    return { success: true };
-  });
-});
+  ipcMain.handle('open-path', async (_, targetPath: string): Promise<boolean> => {
+    const result = await shell.openPath(targetPath)
+    return result === ''
+  })
+
+  ipcMain.handle(
+    'show-item-in-folder',
+    async (_, targetPath: string): Promise<boolean> => {
+      shell.showItemInFolder(targetPath)
+      return true
+    },
+  )
+})

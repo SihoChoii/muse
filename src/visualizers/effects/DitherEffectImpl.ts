@@ -1,5 +1,6 @@
-import { Effect } from 'postprocessing';
-import { Uniform, Vector2 } from 'three';
+import { Effect } from 'postprocessing'
+import type { WebGLRenderTarget, WebGLRenderer } from 'three'
+import { Uniform, Vector2 } from 'three'
 
 const fragmentShader = `
 uniform float strength;
@@ -34,22 +35,31 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 }
 `;
 
-export class DitherEffectImpl extends Effect {
-    constructor({ strength = 0.5, granularity = 1.0 } = {}) {
-        super(
-            'DitherEffect',
-            fragmentShader,
-            {
-                uniforms: new Map([
-                    ['strength', new Uniform(strength)],
-                    ['granularity', new Uniform(granularity)],
-                    ['resolution', new Uniform(new Vector2(1, 1))]
-                ])
-            }
-        );
-    }
+interface DitherEffectOptions {
+  strength?: number
+  granularity?: number
+}
 
-    update(renderer, inputBuffer, deltaTime) {
-        this.uniforms.get('resolution').value.set(inputBuffer.width, inputBuffer.height);
-    }
+export class DitherEffectImpl extends Effect {
+  constructor({ strength = 0.5, granularity = 1.0 }: DitherEffectOptions = {}) {
+    super('DitherEffect', fragmentShader, {
+      uniforms: new Map<string, Uniform<number | Vector2>>([
+        ['strength', new Uniform(strength)],
+        ['granularity', new Uniform(granularity)],
+        ['resolution', new Uniform(new Vector2(1, 1))],
+      ]),
+    })
+  }
+
+  update(
+    _renderer: WebGLRenderer,
+    inputBuffer: WebGLRenderTarget,
+    _deltaTime?: number,
+  ): void {
+    void _deltaTime
+    const resolutionUniform = this.uniforms.get('resolution') as
+      | Uniform<Vector2>
+      | undefined
+    resolutionUniform?.value.set(inputBuffer.width, inputBuffer.height)
+  }
 }

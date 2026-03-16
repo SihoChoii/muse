@@ -1,98 +1,94 @@
-import { useState, useRef, useEffect } from 'react';
-import { motion, useAnimation } from 'framer-motion';
-import { Disc3, ArrowUpFromLine, Disc } from 'lucide-react';
-import { useAudioStore } from '../../store/useAudioStore';
-import { cn } from '../../lib/utils';
+import { useEffect, useRef, useState } from 'react'
+import { motion, useAnimation } from 'framer-motion'
+import { ArrowUpFromLine, Disc, Disc3 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { cn } from '../../lib/utils'
+import { useAudioStore } from '../../store/useAudioStore'
+import { useExportStore } from '../../store/useExportStore'
 
 interface LoadButtonProps {
     className?: string;
 }
 
 export function LoadButton({ className }: LoadButtonProps) {
-    const { currentTrack, setCurrentTrack, setIsPlaying, setAnalyzerData, setAudioElement } = useAudioStore();
-    const inputRef = useRef<HTMLInputElement>(null);
-    const [isHovered, setIsHovered] = useState(false);
-
-    // Internal state to track if we believe we are loaded, 
-    // though we should rely on currentTrack from store.
-    const isLoaded = !!currentTrack;
-
-    // Animation Controls
-    const controls = useAnimation();
-
-    // Create a motion value for rotation to handle physics-like inertia manually if needed,
-    // or use controls.start with transitions.
-    // For "inertia" feel:
-    // Hover -> animate to rotate 360 * N with easeIn. 
-    // HoverOut -> animate to current + small amount with easeOut.
-
-    // Simpler approach for "Gentle Spin":
-    // We can use a rotational velocity.
+    const exportPhase = useExportStore((state) => state.phase)
+    const resetExport = useExportStore((state) => state.resetJob)
+    const {
+        currentTrack,
+        audioElement,
+        setCurrentTrack,
+        setIsPlaying,
+        setAnalyzerData,
+        setUiAnalyzerData,
+        setAudioElement,
+    } = useAudioStore(useShallow((state) => ({
+        currentTrack: state.currentTrack,
+        audioElement: state.audioElement,
+        setCurrentTrack: state.setCurrentTrack,
+        setIsPlaying: state.setIsPlaying,
+        setAnalyzerData: state.setAnalyzerData,
+        setUiAnalyzerData: state.setUiAnalyzerData,
+        setAudioElement: state.setAudioElement,
+    })))
+    const inputRef = useRef<HTMLInputElement>(null)
+    const [isHovered, setIsHovered] = useState(false)
+    const isLoaded = Boolean(currentTrack)
+    const isExporting =
+        exportPhase === 'preparing' ||
+        exportPhase === 'rendering' ||
+        exportPhase === 'finalizing'
+    const controls = useAnimation()
 
     useEffect(() => {
         if (isLoaded) {
-            // Continuous spin when loaded
             controls.start({
                 rotate: 360,
                 transition: {
                     repeat: Infinity,
                     ease: "linear",
-                    duration: 4 // Slow continuous spin
+                    duration: 4
                 }
-            });
+            })
         } else {
-            // Not loaded: stop spinning or handle hover state via separate logic
-            // But if we were spinning, we want to stop.
-            // If dragging/hovering logic handles it, we let that take over.
-            // If we just unloaded, we might want to reset.
-            controls.stop();
-            controls.set({ rotate: 0 }); // Reset for cleanliness
+            controls.stop()
+            controls.set({ rotate: 0 })
         }
-    }, [isLoaded, controls]);
-
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            if (currentTrack) {
-                // Logic for cleaning up if component unmounts? 
-                // No, we want music to keep playing usually, but the requirement says "Eject click: Unload audio". 
-            }
-        };
-    }, []);
-
+    }, [controls, isLoaded])
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            setCurrentTrack(file);
+            resetExport();
+            setCurrentTrack(e.target.files[0]);
             setIsPlaying(true);
         }
     };
 
     const handleClick = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent clicking through to scene elements if necessary
+        e.stopPropagation()
+
+        if (isExporting) {
+            return
+        }
 
         if (isLoaded) {
-            // Eject Logic
-            // Stop playback
-            const audio = document.querySelector('audio');
-            if (audio) {
-                audio.pause();
-                audio.src = '';
+            if (audioElement) {
+                audioElement.pause()
+                audioElement.removeAttribute('src')
             }
 
-            setIsPlaying(false);
-            setCurrentTrack(null);
-            setAnalyzerData(new Uint8Array(0));
-            setAudioElement(null);
-
-            // Clear file input so same file can be selected again
-            if (inputRef.current) inputRef.current.value = '';
+            setIsPlaying(false)
+            setCurrentTrack(null)
+            setAnalyzerData(null)
+            setUiAnalyzerData(null)
+            setAudioElement(null)
+            resetExport()
+            if (inputRef.current) {
+                inputRef.current.value = ''
+            }
         } else {
-            // Load Logic
-            inputRef.current?.click();
+            inputRef.current?.click()
         }
-    };
+    }
 
     return (
         <div className={cn("relative flex items-center justify-center", className)}>
@@ -104,7 +100,6 @@ export function LoadButton({ className }: LoadButtonProps) {
                 className="hidden"
             />
 
-            {/* Interactive Container */}
             <motion.button
                 onClick={handleClick}
                 onMouseEnter={() => setIsHovered(true)}
@@ -115,10 +110,9 @@ export function LoadButton({ className }: LoadButtonProps) {
                     "focus:outline-none transition-colors duration-500",
                     isLoaded ? "bg-cyan-500/10" : "bg-transparent hover:bg-white/5" // Subtle background interact
                 )}
-                whileHover={{ scale: 1.1 }}
+                whileHover={isExporting ? undefined : { scale: 1.1 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
             >
-                {/* Glow Effect (Loaded) */}
                 {isLoaded && (
                     <motion.div
                         className="absolute inset-0 rounded-full blur-xl bg-cyan-500/30"
@@ -128,7 +122,6 @@ export function LoadButton({ className }: LoadButtonProps) {
                     />
                 )}
 
-                {/* Circular Text (Default State) */}
                 {!isLoaded && (
                     <motion.div
                         className="absolute inset-0"
@@ -154,30 +147,14 @@ export function LoadButton({ className }: LoadButtonProps) {
                     </motion.div>
                 )}
 
-                {/* Icon Container */}
                 <div className="relative z-10 p-4 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 shadow-xl">
-                    {/* 
-                        Logic for Icon State:
-                        - Not Loaded: Disc Icon. Spins on Hover.
-                        - Loaded: Disc Icon (Spinning Gradient) -> changes to Eject on Hover/Interaction?
-                        Wait, requirement says: "Load text/icon is replaced by (or reveals) an Eject Icon."
-                        
-                        Let's try:
-                        - Always show Disc Icon spinning in background or center.
-                        - If Active: Disc is Blue Gradient.
-                        - On Hover (if Active): Show Eject Icon.
-                     */}
-
                     {isLoaded ? (
-                        // LOADED STATE
                         <div className="relative w-12 h-12 flex items-center justify-center">
-                            {/* Background Spinner */}
                             <motion.div
                                 className="absolute inset-0 rounded-full border-2 border-t-cyan-400 border-r-cyan-400 border-b-transparent border-l-transparent"
                                 animate={{ rotate: 360 }}
                                 transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                             />
-                            {/* Icon Swap */}
                             <div className="relative z-10 transition-opacity">
                                 {isHovered ? (
                                     <ArrowUpFromLine className="w-6 h-6 text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.8)]" />
@@ -187,7 +164,6 @@ export function LoadButton({ className }: LoadButtonProps) {
                             </div>
                         </div>
                     ) : (
-                        // DEFAULT STATE
                         <motion.div
                             animate={{ rotate: isHovered ? 360 : 0 }}
                             transition={{
@@ -200,7 +176,6 @@ export function LoadButton({ className }: LoadButtonProps) {
                         </motion.div>
                     )}
                 </div>
-
             </motion.button>
         </div>
     );

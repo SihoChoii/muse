@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Disc } from 'lucide-react';
+import museMark from '../../assets/muse-mark.svg';
 
 export function SplashScreen() {
     return (
@@ -26,7 +26,7 @@ export function SplashScreen() {
                     className="relative"
                 >
                     <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full" />
-                    <Disc size={64} className="text-white relative z-10" strokeWidth={1.5} />
+                    <img src={museMark} alt="" className="relative z-10 h-16 w-16" />
                 </motion.div>
 
                 {/* Text Animation */}

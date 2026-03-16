@@ -1,28 +1,25 @@
-import { ipcRenderer, contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  MuseBridge,
+  RenderFramePayload,
+  RenderFinishRequest,
+  RenderFinishResult,
+  RenderStartRequest,
+  RenderStartResult,
+  RenderCommandResult,
+} from '../src/types/export'
 
-// --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
-  },
+const museBridge: MuseBridge = {
+  startRender: (request: RenderStartRequest): Promise<RenderStartResult> =>
+    ipcRenderer.invoke('render-start', request),
+  sendFrame: (payload: RenderFramePayload): Promise<RenderCommandResult> =>
+    ipcRenderer.invoke('render-frame', payload),
+  finishRender: (request: RenderFinishRequest): Promise<RenderFinishResult> =>
+    ipcRenderer.invoke('render-finish', request),
+  openPath: (targetPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('open-path', targetPath),
+  showItemInFolder: (targetPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('show-item-in-folder', targetPath),
+}
 
-  // You can expose other APTs you need here.
-  // ...
-  // Video Render API
-  startRender: (config: { outputPath: string; audioPath: string | null; fps: number }) => ipcRenderer.invoke('render-start', config),
-  sendFrame: (data: string | ArrayBuffer, count?: number) => ipcRenderer.invoke('render-frame', data, count),
-  finishRender: () => ipcRenderer.invoke('render-finish'),
-})
+contextBridge.exposeInMainWorld('muse', museBridge)

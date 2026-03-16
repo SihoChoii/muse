@@ -2,9 +2,17 @@ import React, { useState } from 'react';
 import { useAudioStore } from '../../store/useAudioStore';
 import { Play, Pause, Volume2, VolumeX, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useShallow } from 'zustand/react/shallow';
 
 export const Playbar: React.FC = () => {
-    const { isPlaying, setIsPlaying, currentTrack, volume, setVolume, audioElement } = useAudioStore();
+    const { isPlaying, setIsPlaying, currentTrack, volume, setVolume, audioElement } = useAudioStore(useShallow((state) => ({
+        isPlaying: state.isPlaying,
+        setIsPlaying: state.setIsPlaying,
+        currentTrack: state.currentTrack,
+        volume: state.volume,
+        setVolume: state.setVolume,
+        audioElement: state.audioElement,
+    })));
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);

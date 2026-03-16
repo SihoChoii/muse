@@ -1,187 +1,374 @@
-import { useRef, useEffect, useCallback } from 'react';
-import { useAudioStore } from '../store/useAudioStore';
-import { useCdStore } from '../visualizers/CdSpinner/store';
+import { useCallback } from 'react'
+import { prepareExportAudio } from '../lib/exportAudio'
+import { useAudioStore } from '../store/useAudioStore'
+import { formatEtaLabel, useExportStore } from '../store/useExportStore'
+import type { FrameEncoding, RenderFinishResult } from '../types/export'
 
+type ExportSurface = NonNullable<ReturnType<typeof useExportStore.getState>['surface']>
 
-// @ts-ignore
-const electron = window.ipcRenderer;
+function captureFrame(
+  canvas: HTMLCanvasElement,
+  encoding: FrameEncoding,
+): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          reject(new Error('Unable to capture frame from export surface'))
+          return
+        }
 
-/**
- * useVideoRenderer
- * 
- * Manages the video export process.
- * NOW PERSISTENT via useAudioStore.
- * 
- * The `setInterval` loop is still managed locally via ref, which means
- * if the component unmounts, the loop needs to be safely handled.
- * Ideally, this hook should be mounted high up in the tree (App.tsx),
- * but for now, we're relying on the store to keep the state.
- */
+        try {
+          resolve(await blob.arrayBuffer())
+        } catch (error) {
+          reject(error)
+        }
+      },
+      encoding === 'png' ? 'image/png' : 'image/jpeg',
+      encoding === 'png' ? undefined : 0.92,
+    )
+  })
+}
+
+function waitForBrowserPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve())
+    })
+  })
+}
+
+async function waitForSurface(timeoutMs = 5000) {
+  const existing = useExportStore.getState().surface
+  if (existing) {
+    return existing
+  }
+
+  return new Promise<ExportSurface>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      unsubscribe()
+      reject(new Error('Timed out while waiting for the export surface'))
+    }, timeoutMs)
+
+    const unsubscribe = useExportStore.subscribe((state) => {
+      if (state.surface) {
+        window.clearTimeout(timeoutId)
+        unsubscribe()
+        resolve(state.surface)
+      }
+    })
+  })
+}
+
+function getFrameEncoding() {
+  const { settings } = useExportStore.getState()
+  return settings.transparent || settings.compression === 'lossless'
+    ? 'png'
+    : 'jpeg'
+}
+
 export function useVideoRenderer() {
-    const {
-        isExporting, exportProgress,
-        setIsExporting, setExportProgress
-    } = useAudioStore();
+  const settings = useExportStore((state) => state.settings)
+  const phase = useExportStore((state) => state.phase)
+  const metrics = useExportStore((state) => state.metrics)
+  const result = useExportStore((state) => state.result)
+  const isCancelling = useExportStore((state) => state.isCancelling)
+  const startJob = useExportStore((state) => state.startJob)
+  const setPhase = useExportStore((state) => state.setPhase)
+  const updateMetrics = useExportStore((state) => state.updateMetrics)
+  const setTimeline = useExportStore((state) => state.setTimeline)
+  const setResult = useExportStore((state) => state.setResult)
+  const completeJob = useExportStore((state) => state.completeJob)
+  const failJob = useExportStore((state) => state.failJob)
+  const requestCancel = useExportStore((state) => state.requestCancel)
+  const resetJob = useExportStore((state) => state.resetJob)
 
-    // We use a ref for the animation frame so we can cancel it
-    const animationFrameRef = useRef<number | null>(null);
+  const startExport = useCallback(async () => {
+    if (phase === 'preparing' || phase === 'rendering' || phase === 'finalizing') {
+      return
+    }
 
-    // We also need a ref to track if we *should* be exporting, 
-    // to handle race conditions if the component re-mounts while exporting.
-    const isExportingRef = useRef(isExporting);
+    const muse = window.muse
+    if (!muse) {
+      failJob('Muse export bridge is unavailable in this environment')
+      return
+    }
 
-    // Sync ref with store
-    useEffect(() => {
-        isExportingRef.current = isExporting;
-    }, [isExporting]);
+    const { currentTrack } = useAudioStore.getState()
+    if (!currentTrack) {
+      failJob('Load a track before starting export')
+      return
+    }
 
+    startJob()
 
-    const finishExport = useCallback(async () => {
-        const { audioElement } = useAudioStore.getState();
+    const prepareStartedAt = performance.now()
+    let startRenderSucceeded = false
+    let finishRequested = false
+    let framesRendered = 0
+    let totalFrames = 0
 
-        // Clear animation frame
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null;
+    const finalizeRender = async (
+      cancelled: boolean,
+    ): Promise<RenderFinishResult | null> => {
+      if (!muse || !startRenderSucceeded || finishRequested) {
+        return null
+      }
+
+      finishRequested = true
+      setPhase('finalizing')
+      setTimeline(null)
+      updateMetrics({
+        phaseLabel: cancelled ? 'Finalizing stopped render' : 'Finalizing render',
+        phaseProgress: 100,
+        progress:
+          totalFrames > 0
+            ? Math.max(
+                (framesRendered / totalFrames) * 100,
+                15 + (framesRendered / totalFrames) * 80,
+              )
+            : 0,
+        etaMs: null,
+        framesRendered,
+        totalFrames,
+      })
+
+      return muse.finishRender({ cancelled })
+    }
+
+    try {
+      const preparedAudio = await prepareExportAudio({
+        file: currentTrack,
+        fps: settings.fps,
+        shouldCancel: () => useExportStore.getState().isCancelling,
+        onProgress: async (completed, total) => {
+          const elapsedMs = performance.now() - prepareStartedAt
+          const completionRatio = total === 0 ? 0 : completed / total
+          const etaMs =
+            completionRatio > 0
+              ? (elapsedMs / completionRatio) * (1 - completionRatio)
+              : null
+
+          updateMetrics({
+            phaseLabel: 'Preparing audio',
+            phaseProgress: completionRatio * 100,
+            progress: completionRatio * 15,
+            elapsedMs,
+            etaMs,
+            totalFrames: total,
+          })
+        },
+      })
+
+      if (useExportStore.getState().isCancelling) {
+        setTimeline(null)
+        completeJob({
+          completionKind: 'discarded',
+          framesRendered: 0,
+          totalFrames: useExportStore.getState().metrics.totalFrames,
+        })
+        return
+      }
+
+      totalFrames = Math.max(
+        1,
+        Math.ceil(preparedAudio.duration * settings.fps),
+      )
+      const surface = await waitForSurface()
+      const startResult = await muse.startRender({
+        audioPath: settings.includeAudio ? currentTrack.path ?? null : null,
+        fps: settings.fps,
+        format: settings.format,
+        transparent: settings.format === 'webm' && settings.transparent,
+        includeAudio: settings.includeAudio,
+        width: settings.width,
+        height: settings.height,
+        profile: settings.profile,
+        compression: settings.compression,
+      })
+
+      if (!startResult.success) {
+        if (startResult.cancelled) {
+          resetJob()
+          return
+        }
+        throw new Error(startResult.error ?? 'Unable to start export')
+      }
+
+      startRenderSucceeded = true
+      setResult({
+        outputPath: startResult.outputPath,
+        error: null,
+      })
+      setPhase('rendering')
+
+      const renderStartedAt = performance.now()
+      const frameEncoding = getFrameEncoding()
+
+      for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+        const cancelRequested = useExportStore.getState().isCancelling
+        if (cancelRequested) {
+          break
         }
 
-        if (audioElement) {
-            // Restore playback
-            audioElement.playbackRate = 1;
-            audioElement.pause();
-            audioElement.currentTime = 0;
+        const elapsedMs = performance.now() - renderStartedAt
+        const completedFrames = framesRendered
+        const completionRatio =
+          totalFrames === 0 ? 0 : completedFrames / totalFrames
+        const etaMs =
+          completedFrames > 0
+            ? (elapsedMs / completedFrames) * (totalFrames - completedFrames)
+            : null
+
+        updateMetrics({
+          phaseLabel: cancelRequested ? 'Stopping render' : 'Rendering frames',
+          progress: 15 + completionRatio * 80,
+          phaseProgress: completionRatio * 100,
+          elapsedMs,
+          etaMs,
+          framesRendered: completedFrames,
+          totalFrames,
+        })
+
+        setTimeline({
+          frameIndex,
+          totalFrames,
+          fps: settings.fps,
+          timeSeconds: Math.min(frameIndex / settings.fps, preparedAudio.duration),
+          deltaSeconds: 1 / settings.fps,
+          analyzerData: preparedAudio.analyzerFrames[frameIndex] ?? null,
+        })
+
+        surface.invalidate()
+        await waitForBrowserPaint()
+
+        const frameData = await captureFrame(surface.canvas, frameEncoding)
+        const frameResult = await muse.sendFrame({
+          data: frameData,
+          encoding: frameEncoding,
+        })
+
+        if (!frameResult.success) {
+          throw new Error(frameResult.error ?? 'Unable to write export frame')
         }
 
-        if (electron) {
-            // @ts-expect-error - Custom IPC method
-            await electron.finishRender();
+        framesRendered += 1
+        updateMetrics({
+          phaseLabel: 'Rendering frames',
+          progress: 15 + (framesRendered / totalFrames) * 80,
+          phaseProgress: (framesRendered / totalFrames) * 100,
+          elapsedMs: performance.now() - renderStartedAt,
+          etaMs:
+            framesRendered > 0
+              ? ((performance.now() - renderStartedAt) / framesRendered) *
+                (totalFrames - framesRendered)
+              : null,
+          framesRendered,
+          totalFrames,
+        })
+      }
+
+      const wasCancelled = useExportStore.getState().isCancelling
+      const finishResult = await finalizeRender(wasCancelled)
+      if (!finishResult) {
+        throw new Error('Unable to finalize export')
+      }
+      if (!finishResult.success) {
+        throw new Error(finishResult.error ?? 'Unable to finalize export')
+      }
+
+      completeJob({
+        completionKind: finishResult.completionKind,
+        outputPath:
+          finishResult.completionKind === 'discarded'
+            ? null
+            : finishResult.outputPath ?? startResult.outputPath,
+        framesRendered,
+        totalFrames,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to render export'
+      if (message === 'Export cancelled') {
+        setTimeline(null)
+        completeJob({
+          completionKind: 'discarded',
+          framesRendered: 0,
+          totalFrames: useExportStore.getState().metrics.totalFrames,
+        })
+        return
+      }
+
+      if (startRenderSucceeded && !finishRequested) {
+        const cancelling = useExportStore.getState().isCancelling
+        const finishResult = await finalizeRender(true)
+        if (cancelling && finishResult?.success) {
+          completeJob({
+            completionKind: finishResult.completionKind,
+            outputPath:
+              finishResult.completionKind === 'discarded'
+                ? null
+                : finishResult.outputPath ?? result.outputPath,
+            framesRendered,
+            totalFrames,
+          })
+          return
         }
+      }
 
-        setIsExporting(false);
-        setExportProgress(100);
+      setTimeline(null)
+      failJob(message)
+    }
+  }, [
+    completeJob,
+    failJob,
+    phase,
+    result.outputPath,
+    setPhase,
+    setResult,
+    setTimeline,
+    settings.compression,
+    settings.format,
+    settings.fps,
+    settings.height,
+    settings.includeAudio,
+    settings.profile,
+    settings.transparent,
+    settings.width,
+    startJob,
+    updateMetrics,
+  ])
 
-    }, [setIsExporting, setExportProgress]);
+  const stopExport = useCallback(() => {
+    requestCancel()
+  }, [requestCancel])
 
-    const startExport = useCallback(async (captureSpeed: number = 0.5) => {
-        if (!electron) {
-            console.error("Electron IPC not found");
-            return;
-        }
+  const openOutputPath = useCallback(async () => {
+    if (!result.outputPath || !window.muse) {
+      return false
+    }
+    return window.muse.openPath(result.outputPath)
+  }, [result.outputPath])
 
-        const audioStore = useAudioStore.getState();
-        const { currentTrack, audioElement } = audioStore;
-        // @ts-ignore - duration might be missing on type but exists on runtime state sometimes
-        const duration = (audioStore as any).duration || 0;
+  const showOutputInFolder = useCallback(async () => {
+    if (!result.outputPath || !window.muse) {
+      return false
+    }
+    return window.muse.showItemInFolder(result.outputPath)
+  }, [result.outputPath])
 
-        if (!currentTrack || !audioElement) {
-            alert("No track loaded or audio element missing!");
-            return;
-        }
-
-        setIsExporting(true);
-        setExportProgress(0);
-
-        // 1. Prepare Paths
-        const downloadsPath = '/Users/sihochoi/Downloads';
-        const { currentTrack: trackFromStore } = useAudioStore.getState();
-        const audioPath = trackFromStore?.path || null;
-
-        // 2. Initialize FFmpeg
-        const fps = 60;
-        const { exportSettings } = useCdStore.getState();
-        const extension = exportSettings.format === 'webm' ? 'webm' : 'mp4';
-        const fileName = `muse-export-${Date.now()}.${extension}`;
-        const outputPath = `${downloadsPath}/${fileName}`;
-
-        // @ts-expect-error - Custom IPC method
-        const response = await electron.startRender({
-            outputPath,
-            audioPath,
-            fps,
-            options: {
-                transparent: exportSettings.transparent,
-                format: exportSettings.format
-            }
-        });
-
-        if (!response.success) {
-            console.error("Failed to start render:", response.error);
-            setIsExporting(false);
-            return;
-        }
-
-        // 3. Start Capture Loop
-        audioElement.playbackRate = captureSpeed;
-        audioElement.currentTime = 0;
-        await audioElement.play();
-
-        const totalDuration = duration || 1; // avoid division by zero
-        let frameCount = 0;
-
-        // Clear any existing loop just in case
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-
-        const renderLoop = () => {
-            // Check Ref instead of state for safety in closure
-            if (!isExportingRef.current) {
-                if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-                return;
-            }
-
-            if (!audioElement || audioElement.ended || audioElement.paused) {
-                // Double check we haven't just started (currentTime close to 0?)
-                // Actually, if we awaited play(), paused should be false. 
-                // However, user might pause manually or track ends.
-                finishExport();
-                return;
-            }
-
-            const currentTime = audioElement.currentTime;
-
-            // Calculate how many frames *should* have been emitted by this point in time
-            const expectedFrames = Math.floor(currentTime * fps);
-            const framesNeeded = expectedFrames - frameCount;
-
-            if (framesNeeded > 0) {
-                // Capture Frame
-                const canvas = document.querySelector('canvas');
-                if (canvas) {
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-                    // @ts-expect-error - Custom IPC method with count argument
-                    electron.sendFrame(dataUrl, framesNeeded);
-                }
-                frameCount = expectedFrames;
-            }
-
-            // Update Progress
-            setExportProgress((currentTime / totalDuration) * 100);
-
-            animationFrameRef.current = requestAnimationFrame(renderLoop);
-        };
-
-        animationFrameRef.current = requestAnimationFrame(renderLoop);
-
-    }, [finishExport, setIsExporting, setExportProgress]);
-
-    // Cleanup on unmount?
-    // WARNING: If this hook unmounts (e.g. sidebar closed), we DO NOT want to stop the export
-    // if we want it to persist. 
-    // BUT the `setInterval` is local to this hook instance. If hook dies, interval dies (stops capturing).
-    // The previous implementation had this bug.
-
-    // To fix: The INTERVAL logic must stay alive.
-    // Since we're refactoring to just "Persist State", the user didn't ask "Keep recording in BG".
-    // They asked "If I re-open, show me that it IS recording".
-    // BUT if the interval dies, it IS NOT recording anymore.
-
-    // So for now, we MUST keep the component mounted OR move this hook to App.tsx.
-    // I will refactor this file, but then I will ALSO instantiate useVideoRenderer in App.tsx 
-    // to ensure the loop keeps running.
-
-    return {
-        isRendering: isExporting,
-        progress: exportProgress,
-        startExport,
-        stopExport: finishExport
-    };
+  return {
+    phase,
+    metrics,
+    result,
+    isRendering:
+      phase === 'preparing' || phase === 'rendering' || phase === 'finalizing',
+    isCancelling,
+    etaLabel: formatEtaLabel(metrics.etaMs),
+    startExport,
+    stopExport,
+    resetExport: resetJob,
+    openOutputPath,
+    showOutputInFolder,
+  }
 }
